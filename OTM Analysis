@@ -1,0 +1,75 @@
+import pandas as pd
+
+file_path = '/Users/leronmollon/stock_analysis/'
+
+# Read the datasets
+unusual_options_activity = pd.read_csv(file_path + 'unusual-stock-options-activity-08-23-2023.csv')
+stock_iv_rank = pd.read_csv(file_path + 'stock-iv-rank-and-iv-percentile-08-23-2023.csv')
+most_active_stock_options = pd.read_csv(file_path + 'most-active-stock-options-08-23-2023.csv')
+stocks_increase_volatility = pd.read_csv(file_path + 'stocks-increase-percent-change-in-volatility-08-23-2023.csv')
+stocks_increase_open_interest = pd.read_csv(file_path + 'stocks-increase-change-in-open-interest-08-23-2023.csv')
+
+
+# Normalizing the columns
+datasets = [unusual_options_activity, most_active_stock_options, stocks_increase_volatility, stocks_increase_open_interest]
+for dataset in datasets:
+    dataset['Symbol'] = dataset['Symbol'].str.strip()
+
+# Merging datasets
+merged_data = (
+    unusual_options_activity
+    .merge(stock_iv_rank[['Symbol', 'IV Rank', 'IV Pctl']], on='Symbol', how='left')
+    .merge(most_active_stock_options[['Symbol', '% Put', '% Call', 'P/C Vol']], on='Symbol', how='left')
+    .merge(stocks_increase_volatility[['Symbol', 'Type', 'Strike', 'Exp Date', 'IV %Chg']], on=['Symbol', 'Type', 'Strike', 'Exp Date'], how='left')
+    .merge(stocks_increase_open_interest[['Symbol', 'Type', 'Strike', 'Exp Date', 'OI Chg']], on=['Symbol', 'Type', 'Strike', 'Exp Date'], how='left')
+)
+
+# Filtering OTM options
+otm_options = merged_data[
+    ((merged_data['Type'] == 'Call') & (merged_data['Strike'] > merged_data['Price~'])) |
+    ((merged_data['Type'] == 'Put') & (merged_data['Strike'] < merged_data['Price~']))
+]
+
+# Filtering cheap options (25th percentile)
+ask_price_threshold = otm_options['Ask'].quantile(0.25)
+cheap_otm_options = otm_options[otm_options['Ask'] <= ask_price_threshold]
+
+# Function to find top 10 unique opportunities
+def find_top_10_opportunities(option_type):
+    options = cheap_otm_options[cheap_otm_options['Type'] == option_type]
+    options['Ranking_Score'] = (
+        options['IV'].str.rstrip('%').astype('float') -
+        options['Ask'] +
+        options['IV Rank'].str.rstrip('%').astype('float') +
+        options['IV Pctl'].str.rstrip('%').astype('float')
+    )
+    top_10_unique_symbols = (
+        options
+        .sort_values('Ranking_Score', ascending=False)
+        .drop_duplicates(subset=['Symbol'])
+        .nlargest(10, 'Ranking_Score')
+    )
+    return top_10_unique_symbols[['Symbol', 'Strike', 'Exp Date', 'Ask', 'IV', 'IV Rank', 'IV Pctl', '% Put', '% Call']]
+
+# Finding top 10 unique bullish and bearish opportunities
+top_10_bullish = find_top_10_opportunities('Call')
+top_10_bearish = find_top_10_opportunities('Put')
+
+# Displaying results
+print("Top 10 Bullish Opportunities:")
+print(top_10_bullish)
+print("\nTop 10 Bearish Opportunities:")
+print(top_10_bearish)
+
+# Exporting results to CSV files
+top_10_bullish.to_csv('top_10_bullish_opportunities.csv', index=False)
+top_10_bearish.to_csv('top_10_bearish_opportunities.csv', index=False)
+
+print("\nResults have been saved to CSV files.")
+
+# Exporting results to CSV files
+top_10_bullish.to_csv(file_path + 'top_10_bullish_opportunities.csv', index=False)
+top_10_bearish.to_csv(file_path + 'top_10_bearish_opportunities.csv', index=False)
+
+print("\nResults have been saved to CSV files.")
+
